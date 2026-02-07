@@ -528,9 +528,95 @@ export function getUnifiedProducts({ page = 1, limit = 50, search, category, sub
   };
 }
 
+// Get single product by exact SKU (code field)
+export function getProductBySku(sku) {
+  const product = prepare(`
+    SELECT p.*,
+           sf.slug as storefront_slug,
+           ${STOREFRONT_PRICE_FIELDS},
+           COALESCE(sf.discount_price, sf.sell_price, p.selling_price) as effective_sell_price,
+           COALESCE(sf.discount_price, sf.sell_price, p.selling_price) - p.buying_price as gross_profit,
+           CASE
+             WHEN COALESCE(sf.discount_price, sf.sell_price, p.selling_price) > 0
+             THEN (COALESCE(sf.discount_price, sf.sell_price, p.selling_price) - p.buying_price) / COALESCE(sf.discount_price, sf.sell_price, p.selling_price) * 100
+             ELSE 0
+           END as margin_percent
+    FROM products p
+    ${STOREFRONT_JOIN_SQL}
+    WHERE p.code = ?
+    LIMIT 1
+  `).get(sku);
+
+  if (!product) return null;
+
+  // Get competitors
+  const competitors = prepare(`
+    SELECT seller_name, seller_price, seller_sort
+    FROM competitors
+    WHERE product_id = ?
+    ORDER BY seller_sort ASC
+    LIMIT 10
+  `).all(product.id);
+
+  // Find Petzz rank
+  const petzzCompetitor = competitors.find(c =>
+    c.seller_name?.toLowerCase().includes('petzz')
+  );
+  const petzzRank = petzzCompetitor ? competitors.findIndex(c =>
+    c.seller_name?.toLowerCase().includes('petzz')
+  ) + 1 : null;
+
+  return {
+    id: product.id,
+    sku: product.code,
+    name: product.name,
+    brand: product.brand,
+    category: product.main_category ? `${product.main_category}${product.sub_category ? ' > ' + product.sub_category : ''}` : null,
+    supplier: product.supplier_name,
+    images: JSON.parse(product.images || '[]'),
+
+    pricing: {
+      buying_price: product.buying_price,
+      selling_price: product.effective_sell_price,
+      list_price: product.storefront_sell_price,
+      discount_price: product.storefront_discount_price,
+      discount_percent: product.storefront_discount_percent || 0,
+      gross_profit: product.gross_profit,
+      margin_percent: Math.round(product.margin_percent * 10) / 10
+    },
+
+    stock: {
+      quantity: product.total_quantity,
+      storefront_quantity: product.storefront_stock
+    },
+
+    akakce: product.akakce_product_id ? {
+      low_price: product.akakce_low_price,
+      high_price: product.akakce_high_price,
+      petzz_price: product.akakce_petzz_price,
+      petzz_rank: petzzRank,
+      total_sellers: product.akakce_total_sellers,
+      price_diff: product.effective_sell_price - product.akakce_low_price,
+      price_diff_percent: product.akakce_low_price ?
+        Math.round((product.effective_sell_price - product.akakce_low_price) / product.akakce_low_price * 100 * 10) / 10 : null,
+      competitors: competitors.map(c => ({
+        rank: c.seller_sort + 1,
+        name: c.seller_name,
+        price: c.seller_price
+      }))
+    } : null,
+
+    urls: {
+      petzzshop: product.storefront_slug ? `https://www.petzzshop.com/${product.storefront_slug}` : null,
+      akakce: product.akakce_url
+    }
+  };
+}
+
 export default {
   getProducts,
   getProductById,
+  getProductBySku,
   getProductStats,
   getCategories,
   getBrands,

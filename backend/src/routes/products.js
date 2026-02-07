@@ -135,6 +135,20 @@ router.get('/suppliers', (req, res) => {
   }
 });
 
+// GET /api/products/sku/:sku - Get single product by SKU (exact match)
+router.get('/sku/:sku', (req, res) => {
+  try {
+    const product = productService.getProductBySku(req.params.sku);
+    if (!product) {
+      return res.status(404).json({ error: 'Product not found', sku: req.params.sku });
+    }
+    res.json({ product });
+  } catch (error) {
+    console.error('Error getting product by SKU:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/products/:id - Get single product
 router.get('/:id', (req, res) => {
   try {
